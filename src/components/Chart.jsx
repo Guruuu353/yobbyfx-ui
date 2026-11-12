@@ -1,0 +1,301 @@
+import React, { useEffect, useRef } from "react";
+import { createChart, CrosshairMode } from "lightweight-charts";
+import { drawOverlay } from "../lib/chartOverlay";
+import { fmtTime } from "../lib/format";
+
+const fmtTick = (t, type) => {
+  if (type === 0) return fmtTime(t, { year: "numeric", hour: undefined, minute: undefined });
+  if (type === 1) return fmtTime(t, { month: "short", hour: undefined, minute: undefined });
+  if (type === 2) return fmtTime(t, { day: "numeric", month: "short", hour: undefined, minute: undefined });
+  return fmtTime(t);
+};
+const fmtCross = (t) => fmtTime(t, { day: "2-digit", month: "short" });
+
+/**
+ * Candlestick chart + strategy overlay.
+ *  candles  : [{time, open, high, low, close, volume, session?}]  (UTC epoch seconds)
+ *  analysis : the `analysis` object from /signals/live (4h / 1h / entry / levels / trade)
+ *  layers   : {htf, setup, trigger, levels, sessions}
+ */
+export default function Chart({ candles, dataKey, analysis, own, tf, layers, marks, precision = 2, barSeconds = 900,
+  viewKey, hasVolume = true, onNeedOlder, chartType = "candles", news, newsWin, focus, onFocusDone, heightClass = "h-[340px] md:h-[460px] xl:h-[540px]" }) {
+  const wrapRef = useRef(null);
+  const elRef = useRef(null);
+  const canvasRef = useRef(null);
+  const legendRef = useRef(null);
+  const api = useRef({});          // chart, series, volume
+  const state = useRef({ times: [], runs: [], n: 0, ver: 0, sig: "" });
+  const props = useRef({});
+  props.current = { analysis, own, tf, layers, precision, barSeconds, onNeedOlder, chartType, news, newsWin };
+  const focusDone = useRef(0);
+
+  // ---------- create chart once
+  useEffect(() => {
+    const el = elRef.current;
+    const chart = createChart(el, {
+      width: el.clientWidth, height: el.clientHeight,
+      layout: { background: { color: "transparent" }, textColor: "#9ca3af", fontSize: 11 },
+      grid: { vertLines: { color: "rgba(35,42,53,0.45)" }, horzLines: { color: "rgba(35,42,53,0.45)" } },
+      rightPriceScale: { borderColor: "#232a35", scaleMargins: { top: 0.08, bottom: 0.2 } },
+      timeScale: { borderColor: "#232a35", timeVisible: true, secondsVisible: false, rightOffset: 8, barSpacing: 9, minBarSpacing: 2, tickMarkFormatter: fmtTick },
+      localization: { timeFormatter: fmtCross },
+      crosshair: { mode: CrosshairMode.Normal },
+      kineticScroll: { touch: true, mouse: false },
+    });
+    const series = chart.addCandlestickSeries({
+      upColor: "#12b886", downColor: "#ff4d4f", borderVisible: true, borderUpColor: "#12b886", borderDownColor: "#ff4d4f",
+      wickUpColor: "#12b886", wickDownColor: "#ff4d4f",
+    });
+    const line = chart.addLineSeries({ color: "#d4af37", lineWidth: 2, visible: false, priceLineVisible: true, lastValueVisible: true,
+      crosshairMarkerVisible: true });
+    const area = chart.addAreaSeries({ lineColor: "#d4af37", topColor: "rgba(212,175,55,0.30)", bottomColor: "rgba(212,175,55,0.02)",
+      lineWidth: 2, visible: false });
+    const vol = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol", lastValueVisible: false, priceLineVisible: false });
+    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
+    api.current = { chart, series, line, area, vol };
+
+    const setLegend = (c) => {
+      if (!legendRef.current || !c) return;
+      const p = props.current.precision;
+      const up = c.close >= c.open;
+      legendRef.current.innerHTML =
+        `<span style="color:#6b7280">O</span> ${c.open.toFixed(p)} <span style="color:#6b7280">H</span> ${c.high.toFixed(p)} ` +
+        `<span style="color:#6b7280">L</span> ${c.low.toFixed(p)} <span style="color:#6b7280">C</span> <b style="color:${up ? "#12b886" : "#ff4d4f"}">${c.close.toFixed(p)}</b>`;
+    };
+    api.current.setLegend = setLegend;
+    chart.subscribeCrosshairMove((param) => {
+      const c = param.time != null ? state.current.byTime?.get(param.time) : null;
+      if (c) setLegend(c);
+      else if (api.current.last) setLegend(api.current.last);
+    });
+
+    const sizeCanvas = () => {
+      const cv = canvasRef.current;
+      const dpr = window.devicePixelRatio || 1;
+      const w = el.clientWidth, h = el.clientHeight;
+      cv.width = Math.round(w * dpr);
+      cv.height = Math.round(h * dpr);
+      cv.style.width = `${w}px`;
+      cv.style.height = `${h}px`;
+      state.current.sig = "";
+    };
+    sizeCanvas();
+    const ro = new ResizeObserver(() => {
+      chart.resize(el.clientWidth, el.clientHeight);
+      sizeCanvas();
+    });
+    ro.observe(el);
+
+    // ---------- scroll-back: ask for older candles when the left edge gets close
+    chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+      if (r && r.from < 40) props.current.onNeedOlder?.();
+    });
+
+    // ---------- overlay helpers (time/price -> pixels)
+    const ts = chart.timeScale();
+    const logicalOf = (t) => {
+      const { times } = state.current;
+      const n = times.length;
+      if (!n) return null;
+      const step = props.current.barSeconds;
+      if (t <= times[0]) return (t - times[0]) / step;
+      if (t >= times[n - 1]) return n - 1 + (t - times[n - 1]) / step;
+      let lo = 0, hi = n - 1;
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (times[m] <= t) lo = m; else hi = m; }
+      return lo + (t - times[lo]) / (times[lo + 1] - times[lo]);
+    };
+    const timeAtLogical = (l) => {
+      const { times } = state.current;
+      const n = times.length;
+      const step = props.current.barSeconds;
+      if (l <= 0) return times[0] + l * step;
+      if (l >= n - 1) return times[n - 1] + (l - (n - 1)) * step;
+      const i = Math.floor(l);
+      return times[i] + (l - i) * (times[i + 1] - times[i]);
+    };
+    const x = (t) => { const l = logicalOf(t); return l == null ? null : ts.logicalToCoordinate(l); };
+    const y = (p) => ({ line, area }[props.current.chartType] || series).priceToCoordinate(p);
+
+    let raf;
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      const cv = canvasRef.current;
+      const st = state.current;
+      if (!cv || !st.n) return;
+      const W = ts.width(), H = el.clientHeight - ts.height();
+      const r = ts.getVisibleLogicalRange();
+      const sig = [W, H, r?.from, r?.to, y(1000), y(2000), st.ver, cv.width].join("|");
+      if (sig === st.sig) return;
+      st.sig = sig;
+      const ctx = cv.getContext("2d");
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const { analysis: a, own: ownS, tf: tfc, layers: ly, precision: pr, news: nws, newsWin: nwin } = props.current;
+      try {
+        drawOverlay(ctx, {
+          W, H, x, y, tAtX: (px) => timeAtLogical(ts.coordinateToLogical(px) ?? st.n - 1),
+          analysis: a, own: ownS, tf: tfc, layers: ly || {}, precision: pr, news: nws, newsWin: nwin, sessionRuns: st.runs, compact: el.clientWidth < 560, barSeconds: props.current.barSeconds,
+        });
+      } catch (e) { /* a bad overlay payload (e.g. data from the previous pair) must never break the chart */ }
+    };
+    raf = requestAnimationFrame(loop);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      chart.remove();
+      api.current = {};
+    };
+  }, []);
+
+  // ---------- precision
+  useEffect(() => {
+    const { series, line, area } = api.current;
+    if (!series) return;
+    [series, line, area].forEach((x) => x.applyOptions({ priceFormat: { type: "price", precision, minMove: 1 / 10 ** precision } }));
+  }, [precision]);
+
+  // ---------- candle data
+  useEffect(() => {
+    const { chart, series, line, area, vol, setLegend } = api.current;
+    if (!chart) return;
+    const st = state.current;
+    // The view (pair / timeframe) changed but the data that arrived still belongs to the PREVIOUS view (or nothing has
+    // arrived yet): drop what is on screen instead of drawing old candles under the new view's key. This was the
+    // cause of the chart breaking after a few quick pair / timeframe switches.
+    if (dataKey !== undefined && dataKey !== viewKey) {
+      if (st.viewKey !== viewKey && st.n) {
+        try { series.setData([]); line.setData([]); area.setData([]); vol.setData([]); series.setMarkers([]); line.setMarkers([]); area.setMarkers([]); } catch { /* ignore */ }
+        st.n = 0; st.times = []; st.runs = []; st.first = undefined; st.ver++;
+      }
+      return;
+    }
+    if (!candles?.length) return;
+    // slots the feed never printed (inserted flat by the server) are drawn EMPTY on the candle chart - no fake dashes - but
+    // keep their place on the time axis; the line / area charts simply carry the previous price across them.
+    const data = candles.map((c) => (c.filled ? { time: c.time } : { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
+    const lineData = candles.map((c) => ({ time: c.time, value: c.close }));
+    state.current.byTime = new Map(candles.map((c) => [c.time, c]));
+    const prevN = st.n, fresh = st.viewKey !== viewKey;
+    const vols = candles.map((c) => c.volume || 0);
+    const hasVol = hasVolume && vols.some((v) => v > 0);
+    const volPoint = (i) => {
+      const c = candles[i];
+      const w = vols.slice(Math.max(0, i - 20), i);
+      const avg = w.length ? w.reduce((a, b) => a + b, 0) / w.length : 0;
+      const spike = avg > 0 && c.volume >= 1.5 * avg;
+      const up = c.close >= c.open;
+      return { time: c.time, value: c.volume, color: spike ? "rgba(212,175,55,0.85)" : up ? "rgba(18,184,134,0.35)" : "rgba(255,77,79,0.35)" };
+    };
+
+    // Live flow: when the history is unchanged, only push the forming / new candles (no flicker, keeps the
+    // user's zoom & scroll, auto-follows the right edge). A full reload happens on TF/symbol change and every 60 s.
+    const incremental = !fresh && prevN > 0 && st.first === data[0].time && data.length >= prevN
+      && data.length - prevN < 200 && Date.now() - (st.fullAt || 0) < 60000;
+    const range = chart.timeScale().getVisibleLogicalRange();
+    // older candles were added at the left: keep the user's view where it was (shift by the number of new bars)
+    let prepended = 0;
+    if (!fresh && prevN > 0 && st.first !== undefined && st.first !== data[0].time) {
+      let lo = 0, hi = data.length - 1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (data[m].time < st.first) lo = m + 1; else hi = m; }
+      if (data[lo].time === st.first) prepended = lo;
+    }
+    let didIncremental = incremental;
+    if (incremental) {
+      try {
+        for (let i = prevN - 1; i < data.length; i++) {
+          series.update(data[i]); line.update(lineData[i]); area.update(lineData[i]);
+          if (hasVol) vol.update(volPoint(i));
+        }
+      } catch (e) {          // e.g. "Cannot update oldest data": fall back to a clean full reload
+        didIncremental = false;
+      }
+    }
+    if (!didIncremental) {
+      series.setData(data); line.setData(lineData); area.setData(lineData);
+      vol.setData(hasVol ? candles.map((_, i) => volPoint(i)) : []);
+      st.fullAt = Date.now();
+    }
+    chart.priceScale("right").applyOptions({ scaleMargins: { top: 0.08, bottom: hasVol ? 0.2 : 0.1 } });
+
+    st.first = data[0].time;
+    st.times = data.map((d) => d.time);
+    st.n = data.length;
+    // session runs (contiguous bars sharing a session tag)
+    const runs = [];
+    candles.forEach((c, i) => {
+      if (!c.session) return;
+      const last = runs[runs.length - 1];
+      const end = i + 1 < candles.length ? candles[i + 1].time : c.time + props.current.barSeconds;
+      if (last && last.tag === c.session && last.i1 === i - 1) { last.t1 = end; last.i1 = i; }
+      else if (c.session !== "off") runs.push({ tag: c.session, t0: c.time, t1: end, i1: i });
+    });
+    st.runs = runs;
+    st.ver++;
+    api.current.last = { ...candles[candles.length - 1] };
+    setLegend?.(api.current.last);
+
+    if (fresh || !range) {
+      const w = elRef.current?.clientWidth || 800;
+      const bars = Math.max(40, Math.min(200, Math.round(w / 9)));   // ~9px per candle so candles stay readable
+      chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, data.length - bars), to: data.length + 8 });
+      st.viewKey = viewKey;
+    } else if (!didIncremental) {
+      const atEdge = range.to >= prevN - 1;
+      const shift = prepended > 0 ? prepended : (atEdge ? data.length - prevN : 0);
+      chart.timeScale().setVisibleLogicalRange({ from: range.from + shift, to: range.to + shift });
+    }
+  }, [candles, dataKey, viewKey, hasVolume]);
+
+  // ---------- range buttons: show the last N days; keep pulling older stored pages until they are covered (or run out)
+  useEffect(() => {
+    const chart = api.current.chart;
+    if (!chart || !focus || focusDone.current === focus.nonce || !candles?.length || dataKey !== viewKey) return;
+    const t = candles.map((c) => c.time);
+    const from = Math.floor(Date.now() / 1000) - focus.days * 86400;
+    if (t[0] > from && onNeedOlder) { onNeedOlder(); return; }     // not covered yet: fetch another stored page
+    let i = 0, j = t.length - 1;
+    while (i < j) { const m = (i + j) >> 1; if (t[m] < from) i = m + 1; else j = m; }
+    chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i) - 1, to: t.length + 6 });
+    focusDone.current = focus.nonce;
+    onFocusDone?.({ covered: t[0] <= from, first: t[0] });
+  }, [focus, candles, onNeedOlder, dataKey, viewKey]);
+
+  // ---------- chart type: candles / line / area (same data, same overlay)
+  useEffect(() => {
+    const { series, line, area } = api.current;
+    if (!series) return;
+    series.applyOptions({ visible: chartType === "candles" });
+    line.applyOptions({ visible: chartType === "line" });
+    area.applyOptions({ visible: chartType === "area" });
+    state.current.ver++;
+    state.current.sig = "";
+  }, [chartType]);
+
+  // ---------- markers (drawn on whichever series is showing)
+  useEffect(() => {
+    const { series, line, area } = api.current;
+    const times = state.current.times;
+    if (!series || !times.length) return;
+    const snap = (t) => {
+      let lo = 0, hi = times.length - 1;
+      if (t < times[0]) return null;
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (times[m] <= t) lo = m; else hi = m - 1; }
+      return times[lo];
+    };
+    const list = (marks || []).map((m) => ({ ...m, time: snap(m.time) })).filter((m) => m.time)
+      .sort((a, b) => a.time - b.time);
+    const on = { candles: series, line, area }[chartType] || series;
+    [series, line, area].forEach((x) => x.setMarkers(x === on ? list : []));
+  }, [marks, candles, chartType]);
+
+  useEffect(() => { state.current.ver++; }, [analysis, own, layers, news, newsWin]);
+
+  return (
+    <div ref={wrapRef} className={`relative w-full ${heightClass}`}>
+      <div ref={elRef} className="absolute inset-0" />
+      <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
+      <div ref={legendRef} className="absolute left-2 top-1.5 z-10 text-[11px] font-mono text-gray-300 pointer-events-none bg-bg/60 rounded px-1.5 py-0.5" />
+    </div>
+  );
+}

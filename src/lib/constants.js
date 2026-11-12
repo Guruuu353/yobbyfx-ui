@@ -1,0 +1,40 @@
+const fx = (value, a, b, note = "Forex", precision = 5) => ({ value, label: `${a}/${b}`, short: `${a}${b}`, note, precision, group: "Forex" });
+export const SYMBOLS = [
+  { value: "XAUUSD=X", label: "Gold Spot (matches MT5 XAUUSD)", short: "XAUUSD", note: "Spot gold - same instrument as MT5 (no volume on Yahoo)", precision: 2, group: "Metals" },
+  { value: "GC=F", label: "Gold Futures (COMEX)", short: "GC=F", note: "Futures: trades ~$20-40 above spot, has volume", precision: 2, group: "Metals" },
+  { value: "SI=F", label: "Silver Futures", short: "XAG", note: "COMEX silver", precision: 3, group: "Metals" },
+  fx("EURUSD=X", "EUR", "USD"), fx("GBPUSD=X", "GBP", "USD"), fx("USDJPY=X", "USD", "JPY", "Forex", 3),
+  fx("AUDUSD=X", "AUD", "USD"), fx("NZDUSD=X", "NZD", "USD"), fx("USDCAD=X", "USD", "CAD"), fx("USDCHF=X", "USD", "CHF"),
+  fx("GBPNZD=X", "GBP", "NZD", "Forex cross - wide daily range, trends well in London"),
+  fx("EURAUD=X", "EUR", "AUD"), fx("EURGBP=X", "EUR", "GBP"), fx("EURNZD=X", "EUR", "NZD"), fx("EURCHF=X", "EUR", "CHF"),
+  fx("GBPAUD=X", "GBP", "AUD"), fx("GBPCAD=X", "GBP", "CAD"), fx("AUDNZD=X", "AUD", "NZD"),
+  fx("EURJPY=X", "EUR", "JPY", "Forex cross", 3), fx("GBPJPY=X", "GBP", "JPY", "Forex cross - fast, volatile", 3),
+  fx("AUDJPY=X", "AUD", "JPY", "Forex cross", 3), fx("NZDJPY=X", "NZD", "JPY", "Forex cross", 3), fx("CADJPY=X", "CAD", "JPY", "Forex cross", 3),
+];
+export const SYMBOL_GROUPS = ["Metals", "Forex"];
+
+export const TIMEFRAMES = [
+  { value: "1m", label: "1m", seconds: 60 },
+  { value: "5m", label: "5m", seconds: 300 },
+  { value: "15m", label: "15m", seconds: 900 },
+  { value: "30m", label: "30m", seconds: 1800 },
+  { value: "1h", label: "1H", seconds: 3600 },
+  { value: "4h", label: "4H", seconds: 14400 },
+  { value: "1d", label: "1D", seconds: 86400 },
+  { value: "1w", label: "1W", seconds: 604800 },
+];
+
+export const ENTRY_TFS = ["1m", "5m", "15m", "30m"];
+
+export const tfSeconds = (tf) => TIMEFRAMES.find((t) => t.value === tf)?.seconds ?? 900;
+export const symbolInfo = (s) => SYMBOLS.find((x) => x.value === s) ?? { value: s, label: s, short: s, precision: 2 };
+
+export const COLORS = {
+  bull: "#12b886", bear: "#ff4d4f", gold: "#d4af37", blue: "#3b82f6", amber: "#f59e0b",
+  cyan: "#22d3ee", violet: "#a78bfa", orange: "#fb923c", grey: "#94a3b8",
+};
+
+export const SESSION_COLORS = {
+  asia: "#64748b", london: "#3b82f6", ny: "#f59e0b", overlap: "#a855f7",
+};
+export const SESSION_LABELS = { asia: "Asia", london: "London", ny: "New York", overlap: "London/NY" };
