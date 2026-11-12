@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import api from "../api";
-import { errText, setTimeMode } from "../lib/format";
+import { errText, getServerOffset, setServerOffset, setTimeMode } from "../lib/format";
 import { playAlert, unlockAudio } from "../lib/sound";
 import { showNotice } from "../lib/pwa";
 import { symbolInfo } from "../lib/constants";
@@ -248,6 +248,21 @@ export function LiveProvider({ children }) {
   }, [fetchAlerts]);
 
   const bumpData = useCallback(() => { setDataRev((r) => r + 1); fetchLive({ force: true }); }, [fetchLive]);
+
+  // the broker's real clock (reported by the MT5 Expert Advisor) drives the "MT5 server" time on the charts
+  useEffect(() => {
+    let dead = false;
+    const pull = async () => {
+      try {
+        const { data } = await api.get("/bridge");
+        const off = data?.clock?.server_offset;
+        if (!dead && typeof off === "number" && off !== getServerOffset()) { setServerOffset(off); setDataRev((r) => r + 1); }
+      } catch { /* the bridge is optional */ }
+    };
+    pull();
+    const h = setInterval(pull, 60000);
+    return () => { dead = true; clearInterval(h); };
+  }, []);
   const refresh = useCallback(() => fetchLive({ force: true }), [fetchLive]);
 
   const value = useMemo(() => ({

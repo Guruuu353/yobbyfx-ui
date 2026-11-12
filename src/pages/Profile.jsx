@@ -128,8 +128,8 @@ export default function Profile() {
 
           <div className="text-sm text-gray-200 font-medium mt-4">3 · Clock shown on charts</div>
           <Segmented className="mt-2 w-fit" value={prefs.timeMode} onChange={(v) => { setPref("timeMode", v); bumpData(); }}
-            options={[{ value: "server", label: "MT5 server" }, { value: "utc", label: "UTC" }, { value: "local", label: "My time" }]} />
-          <div className="text-[11px] text-gray-500 mt-1.5">Now showing: <b className="text-gray-300">{timeModeLabel(prefs.timeMode)}</b>. Candle timestamps then read exactly like your MT5 chart.</div>
+            options={[{ value: "server", label: "MT5 server" }, { value: "nairobi", label: "Nairobi" }, { value: "utc", label: "UTC" }, { value: "local", label: "My device" }]} />
+          <div className="text-[11px] text-gray-500 mt-1.5">Now showing: <b className="text-gray-300">{timeModeLabel(prefs.timeMode)}</b>. “MT5 server” uses the broker clock your Expert Advisor reports, so candles read exactly like your MT5 chart. The VPS time zone does not change this: the chart clock is drawn in your browser.</div>
 
           <div className="text-sm text-gray-200 font-medium mt-4">4 · Price calibration ({symbolInfo(prefs.symbol).short})</div>
           {mt5 && (

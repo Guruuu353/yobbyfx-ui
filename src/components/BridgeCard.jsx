@@ -9,6 +9,78 @@ import { cx, errText, fmtAgo, fmtPrice } from "../lib/format";
 
 const GRADES = ["C", "B", "A", "A+"];
 
+const money = (v, cur) => (v == null ? "—" : `${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${cur ? " " + cur : ""}`);
+const pl = (v) => (v == null ? "text-gray-300" : v > 0 ? "text-bull" : v < 0 ? "text-bear" : "text-gray-300");
+
+/** Live account + feed + open positions, straight from the terminal (refreshed every poll of the EA, ~2 s). */
+function LivePanel({ data, orders, onAct, busy, onSync, syncing }) {
+  const a = data?.account;
+  const pos = data?.positions || [];
+  const feed = Object.entries(data?.feed || {});
+  const clk = data?.clock || {};
+  const byId = Object.fromEntries((orders || []).map((o) => [o.id, o]));
+  if (!data?.connected && !a) return null;
+  const stale = !data?.connected;
+  return (
+    <div className="mt-4 rounded-xl border border-border bg-bg/60 p-3">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Live from MT5</div>
+        {stale && <span className="text-[11px] text-amber-400">EA offline — last known values</span>}
+      </div>
+      {a && (
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+          <div className="bg-panel2 rounded-lg p-2"><div className="text-gray-500">Balance</div><div className="tabular-nums text-sm">{money(a.balance, a.currency)}</div></div>
+          <div className="bg-panel2 rounded-lg p-2"><div className="text-gray-500">Equity</div><div className="tabular-nums text-sm">{money(a.equity, a.currency)}</div></div>
+          <div className="bg-panel2 rounded-lg p-2"><div className="text-gray-500">Floating P/L</div><div className={cx("tabular-nums text-sm", pl(a.profit))}>{money(a.profit, a.currency)}</div></div>
+          <div className="bg-panel2 rounded-lg p-2"><div className="text-gray-500">Free margin</div><div className="tabular-nums text-sm">{money(a.margin_free, a.currency)}{a.margin_level ? <span className="block text-[10px] text-gray-600">level {Number(a.margin_level).toFixed(0)}%</span> : null}</div></div>
+        </div>
+      )}
+      {feed.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+          {feed.map(([sym, f]) => (
+            <span key={sym} className={f.live ? "text-bull" : "text-amber-400"}>
+              {symbolInfo(sym).short}: {f.live ? `live (${f.age_sec}s)` : "no live feed — using Yahoo"}
+            </span>
+          ))}
+        </div>
+      )}
+      {clk.server_offset != null && (
+        <div className="mt-2 text-[11px] text-gray-400">
+          Broker clock: <b className="text-gray-200">GMT{clk.server_offset >= 0 ? "+" : ""}{clk.server_offset}</b>
+          {clk.skew_sec != null && Math.abs(clk.skew_sec) > 120 && <span className="text-amber-400"> · this VPS clock is {Math.round(clk.skew_sec / 60)} min off real UTC (fix the VPS clock / time zone)</span>}
+          {clk.mismatch && (
+            <span className="text-amber-400"> · the app assumed GMT{clk.model_offset >= 0 ? "+" : ""}{clk.model_offset} for 4H/Daily candles.
+              <button disabled={syncing} onClick={onSync} className="ml-1 underline text-gold">Match my MT5 clock</button></span>
+          )}
+        </div>
+      )}
+      <div className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-gray-500">Open positions ({pos.length})</div>
+      {pos.length === 0 ? <div className="text-xs text-gray-600 py-2">No open positions in this terminal.</div> : (
+        <div className="mt-1 overflow-x-auto">
+          {pos.map((p) => {
+            const o = p.id ? byId[p.id] : null;
+            const buy = p.type === "BUY";
+            const dec = symbolInfo(o?.symbol || "").precision ?? 2;
+            return (
+              <div key={p.ticket} className="flex items-center gap-2 py-1.5 border-t border-border/60 text-xs min-w-[520px]">
+                <span className={cx("font-bold w-9", buy ? "text-bull" : "text-bear")}>{p.type}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-gray-200 truncate">{p.symbol} <span className="text-gray-500">· {p.volume} lots · @ {fmtPrice(p.open, dec)}{o?.kind && o.kind !== "signal" ? ` · ${o.kind}${o.kind === "early" ? (o.confirmed ? " (confirmed)" : " (waiting for signal)") : ""}` : ""}{!p.id ? " · not from GoldSignal" : ""}</span></div>
+                  <div className="text-[11px] text-gray-500 truncate">SL {p.sl ? fmtPrice(p.sl, dec) : "—"} · TP {p.tp ? fmtPrice(p.tp, dec) : "—"} · now {fmtPrice(p.price, dec)}{o?.manage_note ? ` · ${o.manage_note}` : ""}</div>
+                </div>
+                <span className={cx("tabular-nums font-semibold", pl(p.profit))}>{money(p.profit)}</span>
+                {o && o.status === "open" && !o.close_requested &&
+                  <button disabled={busy} onClick={() => onAct(o.id, "close")} className="px-2 py-1 rounded-lg border border-bear/50 text-bear">Close</button>}
+                {o?.close_requested && <span className="text-[10px] text-amber-400">closing…</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function guessApiUrl() {
   const env = import.meta.env.VITE_API_URL;
   if (env && /^https?:\/\//.test(env)) return env.replace(/\/$/, "");
@@ -47,10 +119,10 @@ function OrderRow({ o, onAct, busy }) {
     <div className="flex items-center gap-2 py-2 border-t border-border/60 text-xs">
       <span className={cx("font-bold w-9", buy ? "text-bull" : "text-bear")}>{o.direction}</span>
       <div className="min-w-0 flex-1">
-        <div className="text-gray-200 truncate">{o.broker_symbol} <span className="text-gray-500">· {o.style || "swing"} · signal #{o.signal_id}</span></div>
+        <div className="text-gray-200 truncate">{o.broker_symbol} <span className="text-gray-500">· {o.kind === "early" ? `early (brain ${o.brain_pct ?? "?"}%)` : o.kind === "topup" ? "top-up" : o.style || "swing"}{o.signal_id ? ` · signal #${o.signal_id}` : ""}</span></div>
         <div className="text-[11px] text-gray-500 truncate">
           {o.fill_price ? `filled ${fmtPrice(o.fill_price, dec)}` : `entry ${fmtPrice(o.entry, dec)}`}
-          {o.lots ? ` · ${o.lots} lots` : ""}{o.profit != null ? ` · P/L ${o.profit}` : ""}
+          {o.lots ? ` · ${o.lots} lots` : ""}{o.status === "open" && o.profit_now != null ? ` · P/L ${o.profit_now}` : o.profit != null ? ` · P/L ${o.profit}` : ""}
           {o.note ? ` · ${o.note}` : ""} · {fmtAgo(o.created_at)}
         </div>
       </div>
@@ -70,8 +142,8 @@ function OrderRow({ o, onAct, busy }) {
 }
 
 export default function BridgeCard() {
-  const { prefs } = useLive();
-  const { data, orders, err, reload, setData } = useBridge({ pollMs: 5000 });
+  const { prefs, bumpData } = useLive();
+  const { data, orders, err, reload, setData } = useBridge({ pollMs: 3000 });
   const [cfg, setCfg] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -80,6 +152,7 @@ export default function BridgeCard() {
   const [apiUrl, setApiUrl] = useState(() => { try { return localStorage.getItem("gs_ea_url") || guessApiUrl(); } catch { return guessApiUrl(); } });
   const [adv, setAdv] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => { if (data && (!cfg || !dirty)) setCfg(data.config); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k, v) => { setCfg((c) => ({ ...c, [k]: v })); setDirty(true); setMsg(null); };
@@ -119,6 +192,11 @@ export default function BridgeCard() {
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     } catch (e) { setMsg({ ok: false, text: "Could not build the EA file: " + errText(e) }); }
   }
+  async function syncClock() {
+    setSyncing(true);
+    try { const r = await api.post("/bridge/clock/sync"); setData(r.data); bumpData(); setMsg({ ok: true, text: "Candle clock now matches your MT5 server." }); }
+    catch (e) { setMsg({ ok: false, text: errText(e) }); } finally { setSyncing(false); }
+  }
   async function act(id, action) {
     setBusy(true);
     try { await api.post(`/bridge/orders/${id}/${action}`); await reload(); } catch (e) { setMsg({ ok: false, text: errText(e) }); } finally { setBusy(false); }
@@ -157,6 +235,8 @@ export default function BridgeCard() {
             I understand Auto places real orders with no further confirmation, that signals are not guaranteed to win, and that I should run it on a <b>demo account first</b>. Auto does not switch on until this is ticked.</span>
         </label>
       )}
+
+      <LivePanel data={data} orders={orders} onAct={act} busy={busy} onSync={syncClock} syncing={syncing} />
 
       {/* ---- pairs */}
       <Group title={`Allowed pairs (${pairs.length})`} cols="grid-cols-1">
@@ -217,26 +297,54 @@ export default function BridgeCard() {
         <label className="block"><span className="block text-[11px] text-gray-400 mb-1">Lot size</span>
           <Segmented size="sm" value={cfg.lot_mode} onChange={(v) => set("lot_mode", v)} options={[{ value: "risk", label: "Risk %" }, { value: "fixed", label: "Fixed lots" }]} /></label>
         {cfg.lot_mode === "risk"
-          ? <Num label="Risk per trade" value={cfg.risk_pct} step={0.05} min={0.05} max={5} suffix="% of balance" hint="lots are worked out from the stop distance" />
-          : <Num label="Lots per trade" value={cfg.lots} step={0.01} min={0.01} suffix="lots" />}
-        <Num label="Largest lot allowed" value={cfg.max_lots} step={0.01} min={0.01} suffix="lots" />
-        <Num label="Max open trades" value={cfg.max_open} min={1} max={20} />
-        <Num label="Max per pair" value={cfg.max_open_per_pair} min={1} max={5} />
-        <Num label="Daily loss stop" value={cfg.daily_loss_r} step={0.5} min={0} max={50} suffix="R" hint="no new trades after this; 0 = off" />
+          ? <Num onChange={(v) => set("risk_pct", v)} label="Risk per trade" value={cfg.risk_pct} step={0.05} min={0.05} max={5} suffix="% of balance" hint="lots are worked out from the stop distance" />
+          : <Num onChange={(v) => set("lots", v)} label="Lots per trade" value={cfg.lots} step={0.01} min={0.01} suffix="lots" />}
+        <Num onChange={(v) => set("max_lots", v)} label="Largest lot allowed" value={cfg.max_lots} step={0.01} min={0.01} suffix="lots" />
+        <Num onChange={(v) => set("max_open", v)} label="Max open trades" value={cfg.max_open} min={1} max={20} />
+        <Num onChange={(v) => set("max_open_per_pair", v)} label="Max per pair" value={cfg.max_open_per_pair} min={1} max={5} />
+        <Num onChange={(v) => set("daily_loss_r", v)} label="Daily loss stop" value={cfg.daily_loss_r} step={0.5} min={0} max={50} suffix="R" hint="no new trades after this; 0 = off" />
+      </Group>
+
+      {/* ---- early entries from the brain */}
+      <Group title="Early entries (brain) — act before the candle closes" cols="grid-cols-1">
+        <div>
+          <Toggle on={!!cfg.early_enabled} onChange={(v) => set("early_enabled", v)} label="Enter early when the brain says the setup is ready"
+            hint="Needs the live MT5 feed. Places a reduced-size trade on your broker's live price when price is in the 1H zone, a trigger candle is forming and the trend lines up. The engine's signal then confirms it (levels aligned, rest of the risk added); if it never confirms, the manager closes it." />
+          {cfg.early_enabled && (
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <Num label="Min readiness" value={cfg.early_min_pct} min={50} max={100} suffix="%" onChange={(v) => set("early_min_pct", v)} />
+              <Num label="Min brain score" value={cfg.early_min_brain} min={0} max={100} onChange={(v) => set("early_min_brain", v)} />
+              <Num label="Early size" value={cfg.early_risk_factor} step={0.1} min={0.1} max={1} suffix="× risk" hint="the rest is added on confirmation" onChange={(v) => set("early_risk_factor", v)} />
+              <Num label="Give up after" value={cfg.early_ttl_bars} min={1} max={20} suffix="candles" hint="if the signal never comes" onChange={(v) => set("early_ttl_bars", v)} />
+              <Toggle on={!!cfg.early_topup} onChange={(v) => set("early_topup", v)} label="Add the rest on confirmation" />
+            </div>
+          )}
+        </div>
+      </Group>
+
+      {/* ---- live trade management */}
+      <Group title="Trade management (checked every ~2 s)">
+        <Num label="Trail from" value={cfg.trail_start_r} step={0.25} min={0} max={10} suffix="R" hint="0 = no trailing" onChange={(v) => set("trail_start_r", v)} />
+        <Num label="Trail distance" value={cfg.trail_gap_r} step={0.25} min={0.2} max={5} suffix="R behind the peak" onChange={(v) => set("trail_gap_r", v)} />
+        <Num label="Close if brain flips" value={cfg.flip_close_pct} min={50} max={100} suffix="%" hint="opposite side ready at this % while the trade is under +1R" onChange={(v) => set("flip_close_pct", v)} />
+        <label className="block"><span className="block text-[11px] text-gray-400 mb-1">Before high-impact news</span>
+          <Segmented size="sm" value={cfg.news_action} onChange={(v) => set("news_action", v)} options={[{ value: "off", label: "Ignore" }, { value: "breakeven", label: "Break-even" }, { value: "close", label: "Close" }]} /></label>
+        <Num label="News guard" value={cfg.news_guard_min} min={1} max={60} suffix="min before" onChange={(v) => set("news_guard_min", v)} />
+        <Num label="Daily loss stop" value={cfg.daily_loss_pct} step={0.5} min={0} max={50} suffix="% of balance" hint="real P/L; 0 = off" onChange={(v) => set("daily_loss_pct", v)} />
       </Group>
 
       <button type="button" onClick={() => setAdv((v) => !v)} className="mt-4 text-xs text-gold hover:underline">{adv ? "Hide" : "Show"} advanced (execution, symbol names)</button>
       {adv && (
         <>
           <Group title="Execution">
-            <Num label="Order expires after" value={cfg.expire_min} min={1} max={120} suffix="min" hint="if the EA cannot place it in time" />
-            <Num label="Break-even at" value={cfg.be_at_r} step={0.25} min={0} max={5} suffix="R" hint="EA moves the stop to entry; 0 = off" />
+            <Num onChange={(v) => set("expire_min", v)} label="Order expires after" value={cfg.expire_min} min={1} max={120} suffix="min" hint="if the EA cannot place it in time" />
+            <Num onChange={(v) => set("be_at_r", v)} label="Break-even at" value={cfg.be_at_r} step={0.25} min={0} max={5} suffix="R" hint="EA moves the stop to entry; 0 = off" />
             <label className="block"><span className="block text-[11px] text-gray-400 mb-1">Stop / target</span>
               <Segmented size="sm" value={cfg.price_mode} onChange={(v) => set("price_mode", v)} options={[{ value: "relative", label: "From MT5 price" }, { value: "absolute", label: "Exact levels" }]} />
               <span className="block text-[10px] text-gray-600 mt-0.5 leading-snug">From MT5 price = same distances applied to your broker's live price (safest if feeds differ).</span></label>
-            {cfg.price_mode === "absolute" && <Num label="Skip if price moved" value={cfg.max_drift_r} step={0.05} min={0.05} max={3} suffix="R" />}
-            <Num label="Max spread" value={cfg.max_spread_pts} min={0} suffix="points" hint="0 = no limit" />
-            <Num label="Slippage" value={cfg.slippage_pts} min={0} suffix="points" />
+            <Num label="Skip if price moved" value={cfg.max_drift_r} step={0.05} min={0.05} max={3} suffix="R" hint="late signal guard (checked on the live broker price)" onChange={(v) => set("max_drift_r", v)} />
+            <Num onChange={(v) => set("max_spread_pts", v)} label="Max spread" value={cfg.max_spread_pts} min={0} suffix="points" hint="0 = no limit" />
+            <Num onChange={(v) => set("slippage_pts", v)} label="Slippage" value={cfg.slippage_pts} min={0} suffix="points" />
           </Group>
           <Toggle on={!!cfg.demo_only} onChange={(v) => set("demo_only", v)} label="Demo accounts only" hint="Leave on until you have watched it trade on demo. Real accounts also need the EA input ‘InpAllowLiveAccount’ switched on." />
           <Group title="Symbol names at your broker">

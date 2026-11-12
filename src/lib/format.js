@@ -9,6 +9,11 @@ export function fmtPrice(v, p = 2) {
 let TIME_MODE = "server";
 export const setTimeMode = (m) => { TIME_MODE = m; };
 export const getTimeMode = () => TIME_MODE;
+// The broker's REAL offset from UTC, as the EA reports it (null = not known: fall back to "New York + 7 h").
+// Brokers that stay on GMT+3 all year (or change clocks on other dates) are not New York + 7 h, which made the chart read 1 h off.
+let SERVER_OFFSET = null;
+export const setServerOffset = (h) => { SERVER_OFFSET = typeof h === "number" && Number.isFinite(h) ? h : null; };
+export const getServerOffset = () => SERVER_OFFSET;
 
 function nyOffsetMs(ms) {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", year: "numeric", month: "numeric",
@@ -16,9 +21,10 @@ function nyOffsetMs(ms) {
   const g = (t) => +parts.find((p) => p.type === t).value;
   return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second")) - Math.floor(ms / 1000) * 1000;
 }
-export function serverGmtOffset(ms = Date.now()) { return Math.round(nyOffsetMs(ms) / 3600000 + 7); }
+export function serverGmtOffset(ms = Date.now()) { return SERVER_OFFSET !== null ? SERVER_OFFSET : Math.round(nyOffsetMs(ms) / 3600000 + 7); }
 export function timeModeLabel(mode = TIME_MODE) {
   if (mode === "utc") return "UTC";
+  if (mode === "nairobi") return "Nairobi (GMT+3)";
   if (mode === "server") { const h = serverGmtOffset(); return `MT5 server (GMT${h >= 0 ? "+" : ""}${h})`; }
   return "My local time";
 }
@@ -28,7 +34,8 @@ export function fmtTime(ts, opts = {}) {
   const ms = typeof ts === "number" ? ts * 1000 : new Date(ts).getTime();
   let d = new Date(ms), tz;
   if (TIME_MODE === "utc") tz = "UTC";
-  else if (TIME_MODE === "server") { d = new Date(ms + nyOffsetMs(ms) + 7 * 3600000); tz = "UTC"; }
+  else if (TIME_MODE === "nairobi") tz = "Africa/Nairobi";
+  else if (TIME_MODE === "server") { d = new Date(ms + (SERVER_OFFSET !== null ? SERVER_OFFSET * 3600000 : nyOffsetMs(ms) + 7 * 3600000)); tz = "UTC"; }
   return d.toLocaleString([], { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz, ...opts });
 }
 
