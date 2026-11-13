@@ -13,20 +13,32 @@ const money = (v, cur) => (v == null ? "—" : `${Number(v).toLocaleString(undef
 const pl = (v) => (v == null ? "text-gray-300" : v > 0 ? "text-bull" : v < 0 ? "text-bear" : "text-gray-300");
 
 /** Live account + feed + open positions, straight from the terminal (refreshed every poll of the EA, ~2 s). */
+const hhmm = (t) => (t ? new Date(t * 1000).toISOString().slice(11, 16) + " UTC" : "?");
+
 function LivePanel({ data, orders, onAct, busy, onSync, syncing }) {
   const a = data?.account;
   const pos = data?.positions || [];
   const feed = Object.entries(data?.feed || {});
   const clk = data?.clock || {};
   const byId = Object.fromEntries((orders || []).map((o) => [o.id, o]));
-  if (!data?.connected && !a) return null;
+  const dg = data?.diag || {};
+  if (!data?.connected && !a && !dg.polls) return null;
   const stale = !data?.connected;
+  const cfgNow = data?.config || {};
+  const realBlocked = a && a.demo === false && (cfgNow.demo_only || a.allow_live === false);
   return (
     <div className="mt-4 rounded-xl border border-border bg-bg/60 p-3">
       <div className="flex items-center justify-between">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Live from MT5</div>
         {stale && <span className="text-[11px] text-amber-400">EA offline — last known values</span>}
       </div>
+      {realBlocked && (
+        <div className="mt-2 text-xs rounded-lg border border-amber-400/40 bg-amber-400/10 text-amber-200 p-2">
+          <ShieldAlert size={13} className="inline -mt-0.5 mr-1" />This is a <b>REAL account</b>, so trading is locked until both switches are on:
+          {cfgNow.demo_only ? <> untick <b>Demo accounts only</b> (Show advanced → below) and save</> : <> <span className="text-bull">app switch ✓</span></>}
+          {a.allow_live === false ? <>; set <b>InpAllowLiveAccount = true</b> in the EA's Inputs tab (MT5 → drag the EA again)</> : <>; <span className="text-bull">EA switch ✓</span></>}.
+        </div>
+      )}
       {a && (
         <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
           <div className="bg-panel2 rounded-lg p-2"><div className="text-gray-500">Balance</div><div className="tabular-nums text-sm">{money(a.balance, a.currency)}</div></div>
@@ -38,16 +50,28 @@ function LivePanel({ data, orders, onAct, busy, onSync, syncing }) {
       {feed.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
           {feed.map(([sym, f]) => (
-            <span key={sym} className={f.live ? "text-bull" : "text-amber-400"}>
-              {symbolInfo(sym).short}: {f.live ? `live (${f.age_sec}s)` : "no live feed — using Yahoo"}
+            <span key={sym} className={f.live ? "text-bull" : "text-amber-400"} title={f.why || ""}>
+              {symbolInfo(sym).short}: {f.live ? `live (${f.age_sec}s)` : `Yahoo fallback — ${f.why || "waiting for the EA"}`}
             </span>
           ))}
+        </div>
+      )}
+      {(dg.polls > 0) && (
+        <div className="mt-2 text-[11px] text-gray-500">
+          Link health: {dg.last_poll_ms != null ? `server answers in ${dg.last_poll_ms} ms` : "—"} · {dg.live_bars_in != null ? `${dg.live_bars_in} live candles in the last poll` : ""}
+          {dg.ea_err && <span className="text-amber-400"> · EA reports: {dg.ea_err}</span>}
+          {dg.last_error && <span className="text-bear"> · server problem: {dg.last_error}</span>}
+        </div>
+      )}
+      {clk.skew_sec != null && Math.abs(clk.skew_sec) > 300 && (
+        <div className="mt-2 text-[11px] text-amber-400">
+          Two clocks disagree by {Math.round(Math.abs(clk.skew_sec) / 60)} min: your MT5 PC thinks it is {hhmm(clk.ea_utc)}, this server thinks {hhmm(clk.server_utc)}.
+          One of them has the wrong time or time zone (set the VPS time zone, not the clock). Check against time.is.
         </div>
       )}
       {clk.server_offset != null && (
         <div className="mt-2 text-[11px] text-gray-400">
           Broker clock: <b className="text-gray-200">GMT{clk.server_offset >= 0 ? "+" : ""}{clk.server_offset}</b>
-          {clk.skew_sec != null && Math.abs(clk.skew_sec) > 120 && <span className="text-amber-400"> · this VPS clock is {Math.round(clk.skew_sec / 60)} min off real UTC (fix the VPS clock / time zone)</span>}
           {clk.mismatch && (
             <span className="text-amber-400"> · the app assumed GMT{clk.model_offset >= 0 ? "+" : ""}{clk.model_offset} for 4H/Daily candles.
               <button disabled={syncing} onClick={onSync} className="ml-1 underline text-gold">Match my MT5 clock</button></span>
