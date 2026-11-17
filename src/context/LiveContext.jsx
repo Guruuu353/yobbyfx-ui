@@ -14,7 +14,8 @@ const DEFAULTS = {
   alertReady: true, alertCounter: true, alertApproval: true, alertShift: true,
 };
 const POLL_MS = 10000;
-const QUOTE_MS = 6000;
+const QUOTE_MS = 2000;          // the top-bar price follows the broker feed closely
+const MAX_PAIRS = 12;
 
 function loadPrefs() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("gs_prefs") || "{}") }; }
@@ -33,6 +34,11 @@ export function LiveProvider({ children }) {
   const [history, setHistory] = useState([]);
   const [quote, setQuote] = useState(null);
   const [dataRev, setDataRev] = useState(0);
+  // "My pairs": the pairs I watch. ONE list for everything - selector, watchlist, scanner AND the pairs the MT5 Expert may trade.
+  const [myPairs, setMyPairsState] = useState(() => { try { return JSON.parse(localStorage.getItem("gs_pairs") || "[]"); } catch { return []; } });
+  const [pairsOpen, setPairsOpen] = useState(false);
+  const openPairs = useCallback(() => setPairsOpen(true), []);
+  const closePairs = useCallback(() => setPairsOpen(false), []);
   const [chartItem, setChartItem] = useState(null);      // pair shown in the full-chart pop-up (null = closed)
   const openChart = useCallback((item) => setChartItem(item), []);
   const closeChart = useCallback(() => setChartItem(null), []);
@@ -164,6 +170,11 @@ export function LiveProvider({ children }) {
     document.title = `${unseen ? `(${unseen}) ` : ""}GoldSignal`;
   }, [unseen]);
 
+  // the selected pair always belongs to "My pairs" (once the list exists)
+  useEffect(() => {
+    if (myPairs.length && !myPairs.includes(prefs.symbol)) setPref("symbol", myPairs[0]);
+  }, [myPairs, prefs.symbol, setPref]);
+
 
   // ---- brain alerts: readiness / candle approval / quick shifts, found by comparing this poll with the last one.
   // Client side only (the server's own "signal" alerts are untouched). The first read of a pair never alerts.
@@ -249,6 +260,14 @@ export function LiveProvider({ children }) {
 
   const bumpData = useCallback(() => { setDataRev((r) => r + 1); fetchLive({ force: true }); }, [fetchLive]);
 
+  const savePairs = useCallback(async (list) => {
+    const next = [...new Set(list)].slice(0, MAX_PAIRS);
+    setMyPairsState(next);
+    localStorage.setItem("gs_pairs", JSON.stringify(next));
+    try { await api.put("/bridge/config", { pairs: next }); } catch (e) { setError(errText(e)); }
+    if (next.length && !next.includes(prefsRef.current.symbol)) setPref("symbol", next[0]);
+  }, [setPref]);
+
   // the broker's real clock (reported by the MT5 Expert Advisor) drives the "MT5 server" time on the charts
   useEffect(() => {
     let dead = false;
@@ -257,6 +276,10 @@ export function LiveProvider({ children }) {
         const { data } = await api.get("/bridge");
         const off = data?.clock?.server_offset;
         if (!dead && typeof off === "number" && off !== getServerOffset()) { setServerOffset(off); setDataRev((r) => r + 1); }
+        const sp = data?.config?.pairs;
+        if (!dead && Array.isArray(sp)) {                      // the server list is the truth
+          setMyPairsState((cur) => { if (JSON.stringify(cur) === JSON.stringify(sp)) return cur; localStorage.setItem("gs_pairs", JSON.stringify(sp)); return sp; });
+        }
       } catch { /* the bridge is optional */ }
     };
     pull();
@@ -268,8 +291,8 @@ export function LiveProvider({ children }) {
   const value = useMemo(() => ({
     prefs, setPref, live, quote, dataRev, bumpData, error, loading, lastUpdate, refresh,
     alerts, unseen, markRead, toasts, dismissToast, history, fetchHistory, enableDesktop, sendTest,
-    chartItem, openChart, closeChart,
-  }), [chartItem, openChart, closeChart, prefs, setPref, live, quote, dataRev, bumpData, error, loading, lastUpdate, refresh, alerts, unseen, markRead, toasts,
+    chartItem, openChart, closeChart, myPairs, savePairs, pairsOpen, openPairs, closePairs,
+  }), [myPairs, savePairs, pairsOpen, openPairs, closePairs, chartItem, openChart, closeChart, prefs, setPref, live, quote, dataRev, bumpData, error, loading, lastUpdate, refresh, alerts, unseen, markRead, toasts,
        dismissToast, history, fetchHistory, enableDesktop, sendTest]);
 
   return <LiveCtx.Provider value={value}>{children}</LiveCtx.Provider>;

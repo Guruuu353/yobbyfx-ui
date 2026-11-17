@@ -1,6 +1,7 @@
 import React from "react";
 import { cx } from "../lib/format";
 import { SYMBOLS, SYMBOL_GROUPS } from "../lib/constants";
+import { useLive } from "../context/LiveContext";
 
 export function Card({ title, right, children, className = "", pad = true, icon: Icon, id }) {
   return (
@@ -108,14 +109,26 @@ export function Ring({ value, size = 76, tone = "gold", label = "agree" }) {
 }
 
 /** Pair picker grouped by market (Metals / Forex) so a long list stays easy to scan. */
-export function SymbolSelect({ value, onChange, className = "" }) {
+export function SymbolSelect({ value, onChange, className = "", all = false }) {
+  const live = useLive();
+  const mine = !all && live?.myPairs?.length ? live.myPairs : null;
+  if (!mine) {                                   // no personal list yet (or a page that needs every pair): the full grouped list
+    return (
+      <select value={value} onChange={(e) => (e.target.value === "__edit__" ? live?.openPairs?.() : onChange(e.target.value))} className={className}>
+        {SYMBOL_GROUPS.map((g) => (
+          <optgroup key={g} label={g}>
+            {SYMBOLS.filter((s) => s.group === g).map((s) => <option key={s.value} value={s.value}>{s.short} · {s.label}</option>)}
+          </optgroup>
+        ))}
+        {!all && live?.openPairs && <option value="__edit__">＋ Choose my pairs…</option>}
+      </select>
+    );
+  }
+  const list = mine.includes(value) ? mine : [value, ...mine];
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className={className}>
-      {SYMBOL_GROUPS.map((g) => (
-        <optgroup key={g} label={g}>
-          {SYMBOLS.filter((s) => s.group === g).map((s) => <option key={s.value} value={s.value}>{s.short} · {s.label}</option>)}
-        </optgroup>
-      ))}
+    <select value={value} onChange={(e) => (e.target.value === "__edit__" ? live.openPairs() : onChange(e.target.value))} className={className}>
+      {list.map((v) => { const s = SYMBOLS.find((x) => x.value === v); return <option key={v} value={v}>{s ? `${s.short} · ${s.label}` : v}</option>; })}
+      <option value="__edit__">＋ Edit my pairs…</option>
     </select>
   );
 }

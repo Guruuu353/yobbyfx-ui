@@ -226,7 +226,7 @@ export default function Backtest() {
       <Card title="Backtest the strategy" icon={FlaskConical}>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 items-end">
           <label className="block text-xs text-gray-500">Symbol
-            <SymbolSelect value={f.symbol} onChange={(v) => setF({ ...f, symbol: v })} className="mt-1 w-full h-10 bg-panel2 border border-border rounded-lg px-2 text-sm text-gray-100" />
+            <SymbolSelect all value={f.symbol} onChange={(v) => setF({ ...f, symbol: v })} className="mt-1 w-full h-10 bg-panel2 border border-border rounded-lg px-2 text-sm text-gray-100" />
           </label>
           <div className="text-xs text-gray-500">Entry timeframe
             <Segmented className="mt-1" options={ENTRY_TFS} value={f.entry_interval} onChange={(v) => setF({ ...f, entry_interval: v })} />

@@ -43,7 +43,7 @@ export default function HistoryCard() {
         <p className="leading-snug">Yahoo only serves about 60 days of 5m / 15m / 30m candles. Import a CSV exported from MetaTrader 5 to load months or years; the chart range buttons, past-signal replay and backtests then use it. Imported candles are kept and never overwritten by the live feed.</p>
         <div className="grid grid-cols-2 gap-2 items-end">
           <label className="col-span-2">Pair
-            <SymbolSelect value={symbol} onChange={setSymbol} className="mt-1 w-full bg-panel2 border border-border rounded-lg px-2 py-2 text-sm text-gray-200" />
+            <SymbolSelect all value={symbol} onChange={setSymbol} className="mt-1 w-full bg-panel2 border border-border rounded-lg px-2 py-2 text-sm text-gray-200" />
           </label>
           <div className="col-span-2"><div className="mb-1">Timeframe of the file</div><Segmented size="sm" value={tf} onChange={setTf} options={TFS} /></div>
           <label>Broker time (hours from UTC)

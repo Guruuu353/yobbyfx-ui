@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Eye, RefreshCw } from "lucide-react";
 import api from "../api";
 import { Card, Chip, Spinner } from "./ui";
@@ -126,24 +126,26 @@ export default function MarketWatch({ full = false }) {
 }
 
 export function Watchlist() {
-  const { prefs, setPref } = useLive();
+  const { prefs, setPref, myPairs, openPairs } = useLive();
   const [q, setQ] = useState([]);
+  const shown = useMemo(() => (myPairs.length ? SYMBOLS.filter((s) => myPairs.includes(s.value)) : SYMBOLS.slice(0, 6)), [myPairs]);
+  const key = shown.map((s) => s.value).join(",");
   useEffect(() => {
     let dead = false;
     const run = async () => {
       try {
-        const { data } = await api.get("/market/watchlist", { params: { symbols: SYMBOLS.map((s) => s.value).join(",") } });
+        const { data } = await api.get("/market/watchlist", { params: { symbols: key } });
         if (!dead) setQ(data.quotes);
       } catch { /* ignore */ }
     };
     run();
-    const t = setInterval(run, 60000);
+    const t = setInterval(run, 15000);                       // only my pairs: a small, cheap call
     return () => { dead = true; clearInterval(t); };
-  }, []);
+  }, [key]);
   return (
-    <Card title="Watchlist" icon={Eye}>
+    <Card title="My pairs" icon={Eye} right={<button onClick={openPairs} className="text-[11px] text-gold hover:underline">Edit</button>}>
       <ul className="divide-y divide-border/60">
-        {SYMBOLS.map((s) => {
+        {shown.map((s) => {
           const r = q.find((x) => x.symbol === s.value);
           const up = r?.change >= 0;
           return (

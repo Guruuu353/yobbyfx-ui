@@ -29,7 +29,9 @@ function Detail({ id }) {
 }
 
 export default function Signals() {
-  const { history, fetchHistory, openChart } = useLive();
+  const { history, fetchHistory, openChart, myPairs, prefs } = useLive();
+  const [pair, setPair] = useState("all");               // "all" = every pair, or one symbol
+  const [list, setList] = useState(history);
   const [hidden, setHidden] = useState({});          // previews the user collapsed
   const [filter, setFilter] = useState("all");
   const [open, setOpen] = useState(null);
@@ -39,11 +41,18 @@ export default function Signals() {
 
   useEffect(() => { api.get("/profile/me").then((r) => setStats(r.data)).catch(() => {}); }, [history]);
 
-  const rows = useMemo(() => history.filter((r) => filter === "all" || r.status === filter), [history, filter]);
+  const loadList = React.useCallback(async () => {
+    try { const { data } = await api.get("/signals/history", { params: pair === "all" ? {} : { symbol: pair } }); setList(data); } catch { /* keep what is shown */ }
+  }, [pair]);
+  useEffect(() => { loadList(); const t = setInterval(loadList, 15000); return () => clearInterval(t); }, [loadList]);
+  useEffect(() => { loadList(); }, [history]);          // eslint-disable-line react-hooks/exhaustive-deps
+  const counts = useMemo(() => { const m = {}; list.forEach((r) => { m[r.symbol] = (m[r.symbol] || 0) + 1; }); return m; }, [list]);
+  const pairChips = useMemo(() => [...new Set([...(myPairs || []), ...(pair !== "all" ? [pair] : []), prefs.symbol])], [myPairs, pair, prefs.symbol]);
+  const rows = useMemo(() => list.filter((r) => filter === "all" || r.status === filter), [list, filter]);
 
   async function close(id, result) {
     setBusy(id); setErr(null);
-    try { await api.post(`/signals/${id}/close`, null, { params: { result } }); await fetchHistory(); }
+    try { await api.post(`/signals/${id}/close`, null, { params: { result } }); await fetchHistory(); await loadList(); }
     catch (e) { setErr(errText(e)); } finally { setBusy(null); }
   }
 
@@ -65,7 +74,20 @@ export default function Signals() {
           <Stat label="Avg agreement" value={`${stats.avg_agreement}%`} />
         </div>
       )}
-      <Card title="Signal history" right={<Segmented size="sm" options={FILTERS} value={filter} onChange={setFilter} />}>
+      <div className="flex flex-wrap gap-1.5">
+        <button onClick={() => setPair("all")} className={cx("px-3 py-1.5 rounded-lg border text-xs font-semibold", pair === "all" ? "border-gold bg-gold/15 text-gold" : "border-border text-gray-400 hover:border-gray-500")}>All pairs</button>
+        {pairChips.map((v) => (
+          <button key={v} onClick={() => setPair(v)} className={cx("px-3 py-1.5 rounded-lg border text-xs font-semibold", pair === v ? "border-gold bg-gold/15 text-gold" : "border-border text-gray-400 hover:border-gray-500")}>
+            {symbolInfo(v).short}{pair === "all" && counts[v] ? <span className="ml-1 text-gray-500">{counts[v]}</span> : null}
+          </button>
+        ))}
+      </div>
+      {pair !== "all" && rows.length > 0 && (() => {
+        const w = rows.filter((r) => r.status === "won").length, l = rows.filter((r) => r.status === "lost").length;
+        const net = rows.reduce((a, r) => a + (r.status === "won" ? Number(r.result_r || 0) : r.status === "lost" ? -1 : 0), 0);
+        return <div className="text-xs text-gray-400">{symbolInfo(pair).short}: <b className="text-gray-200">{rows.length}</b> signals · {w}W / {l}L · net <b className={net >= 0 ? "text-bull" : "text-bear"}>{net > 0 ? "+" : ""}{net.toFixed(2)}R</b></div>;
+      })()}
+      <Card title={pair === "all" ? "Signal history — all pairs" : `Signal history — ${symbolInfo(pair).short}`} right={<Segmented size="sm" options={FILTERS} value={filter} onChange={setFilter} />}>
         {err && <div className="text-sm text-bear mb-2">{err}</div>}
         {!rows.length ? <Empty>No signals in this view yet.</Empty> : (
           <ul className="divide-y divide-border/60">

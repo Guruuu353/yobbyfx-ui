@@ -5,6 +5,7 @@ import { Bot, Newspaper, AlertTriangle, BarChart3, Bell, BookOpen, CircleUser, F
 import { useAuth } from "../context/AuthContext.jsx";
 import { LiveProvider, useLive } from "../context/LiveContext";
 import { Chip, ErrorBoundary, Segmented, SymbolSelect } from "./ui";
+import PairsModal from "./PairsModal";
 import LivePrice from "./LivePrice";
 import ChartModal from "./ChartModal";
 import { ActivityLog, AlertsFeed, HappeningNow } from "./AlertsBoard";
@@ -247,7 +248,7 @@ function TopBar() {
 
 function Shell() {
   const { user, logout } = useAuth();
-  const { prefs, chartItem, closeChart } = useLive();
+  const { prefs, chartItem, closeChart, pairsOpen } = useLive();
   const loc = useLocation();
   const [more, setMore] = useState(false);
   return (
@@ -305,6 +306,7 @@ function Shell() {
           </div>
         </>
       )}
+      {pairsOpen && <PairsModal />}
       {chartItem && <ChartModal key={`${chartItem.symbol}-${chartItem.tf}-${chartItem.title}`} item={chartItem} onClose={closeChart} />}
       <Toasts />
     </div>

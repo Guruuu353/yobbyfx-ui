@@ -40,6 +40,12 @@ function LivePanel({ data, orders, onAct, busy, onSync, syncing }) {
         </div>
       )}
       {a && (
+        <div className="mt-2 text-[11px] text-gray-400">
+          Account <b className="text-gray-200">#{a.login}</b> · {a.company || a.server} · <b className={a.demo === false ? "text-amber-300" : "text-gray-200"}>{a.demo === false ? "REAL" : "DEMO"}</b>{a.leverage ? ` · 1:${a.leverage}` : ""}
+          {a.balance <= 0 && <span className="text-bear"> · this terminal reports a balance of 0 — orders cannot be sized or placed. In MT5 make sure you are logged into the funded account (File → Login).</span>}
+        </div>
+      )}
+      {a && (
         <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
           <div className="bg-panel2 rounded-lg p-2"><div className="text-gray-500">Balance</div><div className="tabular-nums text-sm">{money(a.balance, a.currency)}</div></div>
           <div className="bg-panel2 rounded-lg p-2"><div className="text-gray-500">Equity</div><div className="tabular-nums text-sm">{money(a.equity, a.currency)}</div></div>
@@ -166,7 +172,7 @@ function OrderRow({ o, onAct, busy }) {
 }
 
 export default function BridgeCard() {
-  const { prefs, bumpData } = useLive();
+  const { prefs, bumpData, savePairs, openPairs } = useLive();
   const { data, orders, err, reload, setData } = useBridge({ pollMs: 3000 });
   const [cfg, setCfg] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -182,7 +188,7 @@ export default function BridgeCard() {
   const set = (k, v) => { setCfg((c) => ({ ...c, [k]: v })); setDirty(true); setMsg(null); };
 
   const pairs = cfg?.pairs || [];
-  const togglePair = (v) => set("pairs", pairs.includes(v) ? pairs.filter((x) => x !== v) : [...pairs, v]);
+  const togglePair = (v) => { const next = pairs.includes(v) ? pairs.filter((x) => x !== v) : [...pairs, v]; set("pairs", next); savePairs(next); };   // same list as "My pairs"
   const grouped = useMemo(() => SYMBOL_GROUPS.map((g) => [g, SYMBOLS.filter((s) => s.group === g)]), []);
 
   async function save(patch = {}) {
@@ -263,8 +269,9 @@ export default function BridgeCard() {
       <LivePanel data={data} orders={orders} onAct={act} busy={busy} onSync={syncClock} syncing={syncing} />
 
       {/* ---- pairs */}
-      <Group title={`Allowed pairs (${pairs.length})`} cols="grid-cols-1">
+      <Group title={`Allowed pairs (${pairs.length}) — same as My pairs`} cols="grid-cols-1">
         <div>
+          <div className="text-[11px] text-gray-500 mb-2">The pairs you analyse are the pairs this Expert trades. Changing them here or in <button type="button" onClick={openPairs} className="text-gold underline">My pairs</button> updates both, and the server stops scanning the rest.</div>
           {grouped.map(([g, list]) => (
             <div key={g} className="mb-2">
               <div className="text-[10px] text-gray-600 mb-1">{g}</div>
@@ -367,6 +374,7 @@ export default function BridgeCard() {
               <Segmented size="sm" value={cfg.price_mode} onChange={(v) => set("price_mode", v)} options={[{ value: "relative", label: "From MT5 price" }, { value: "absolute", label: "Exact levels" }]} />
               <span className="block text-[10px] text-gray-600 mt-0.5 leading-snug">From MT5 price = same distances applied to your broker's live price (safest if feeds differ).</span></label>
             <Num label="Skip if price moved" value={cfg.max_drift_r} step={0.05} min={0.05} max={3} suffix="R" hint="late signal guard (checked on the live broker price)" onChange={(v) => set("max_drift_r", v)} />
+            <Num onChange={(v) => set("minlot_x", v)} label="Smallest lot may risk" value={cfg.minlot_x} step={0.5} min={1} max={10} suffix="× budget" hint="small accounts: the minimum lot can risk more than your % budget; orders above this are skipped" />
             <Num onChange={(v) => set("max_spread_pts", v)} label="Max spread" value={cfg.max_spread_pts} min={0} suffix="points" hint="0 = no limit" />
             <Num onChange={(v) => set("slippage_pts", v)} label="Slippage" value={cfg.slippage_pts} min={0} suffix="points" />
           </Group>

@@ -34,7 +34,35 @@ export function useCandles(symbol, tf, limit = 1000, rev = 0) {
     };
     run();
     const t = setInterval(run, pollMs(tf));
-    return () => { dead = true; ctl.abort(); clearInterval(t); };
+
+    // REAL-TIME: every ~1.5 s only the newest candles (+ the forming one) are fetched and merged into the chart, so it moves with the
+    // broker's price instead of waiting for the full poll. Paused while the tab is hidden.
+    let tailBusy = false;
+    const tailMs = tfSeconds(tf) <= 3600 ? 1500 : 5000;
+    const tailRun = async () => {
+      if (dead || tailBusy || document.hidden) return;
+      tailBusy = true;
+      try {
+        const { data } = await api.get("/market/tail", { params: { symbol, interval: tf, n: 3 }, signal: ctl.signal });
+        if (dead || !data?.candles?.length) return;
+        setS((x) => {
+          if (x.key !== key || !x.candles.length) return x;
+          const arr = x.candles.slice();
+          for (const c of data.candles) {
+            const last = arr[arr.length - 1];
+            if (c.time > last.time) arr.push(c);
+            else {
+              let i = arr.length - 1;
+              while (i > 0 && arr[i].time > c.time && arr.length - i < 6) i -= 1;
+              if (arr[i].time === c.time) arr[i] = { ...arr[i], ...c };
+            }
+          }
+          return { ...x, candles: arr };
+        });
+      } catch { /* the full poll reports problems */ } finally { tailBusy = false; }
+    };
+    const t2 = setInterval(tailRun, tailMs);
+    return () => { dead = true; ctl.abort(); clearInterval(t); clearInterval(t2); };
   }, [symbol, tf, limit, rev]);
   return s;
 }
