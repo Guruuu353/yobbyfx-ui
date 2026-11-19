@@ -62,6 +62,23 @@ function LivePanel({ data, orders, onAct, busy, onSync, syncing }) {
           ))}
         </div>
       )}
+      {data?.connected && data?.last_seen && (Date.now() / 1000 - data.last_seen) > 15 && (
+        <div className="mt-2 text-[11px] text-amber-400">
+          The EA last polled {Math.round(Date.now() / 1000 - data.last_seen)} s ago, so candles may use the delayed Yahoo feed until it recovers.
+          {dg.hist && dg.hist !== "done" ? ` It is busy sending history (${dg.hist}).` : " Check the VPS load and the MT5 connection."}
+        </div>
+      )}
+      {dg.hist && dg.hist !== "done" && <div className="mt-1 text-[11px] text-gray-500">Sending MT5 history to the app: {dg.hist} (runs in the background, the live feed has priority).</div>}
+      {a && a.demo !== undefined && (a.terminal_trade_allowed === false || a.mql_trade_allowed === false || a.account_trade_allowed === false || a.trade_expert === false || a.connected === false) && (
+        <div className="mt-2 text-xs rounded-lg border border-bear/40 bg-bear/10 text-red-200 p-2">
+          <b>MT5 will not place trades yet:</b>
+          {a.connected === false && <div>• MT5 is not connected to the broker.</div>}
+          {a.terminal_trade_allowed === false && <div>• The Algo Trading button in the MT5 toolbar is OFF — press it so it turns green.</div>}
+          {a.mql_trade_allowed === false && <div>• This EA has no permission: remove it, drag it on again and tick “Allow Algo Trading” in the Common tab.</div>}
+          {a.account_trade_allowed === false && <div>• This account is <b>read-only</b>: you are logged in with the <b>investor</b> password (or the broker disabled trading). In MT5: File → Login to Trade Account and use the master (trading) password.</div>}
+          {a.trade_expert === false && <div>• Your broker does not allow Expert Advisors on this account type.</div>}
+        </div>
+      )}
       {(dg.polls > 0) && (
         <div className="mt-2 text-[11px] text-gray-500">
           Link health: {dg.last_poll_ms != null ? `server answers in ${dg.last_poll_ms} ms` : "—"} · {dg.live_bars_in != null ? `${dg.live_bars_in} live candles in the last poll` : ""}

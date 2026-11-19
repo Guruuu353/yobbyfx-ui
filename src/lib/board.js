@@ -1,3 +1,4 @@
+import { useLive } from "../context/LiveContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import api from "../api";
 import { SYMBOLS, symbolInfo } from "./constants";
@@ -45,7 +46,9 @@ const STALE_SEC = 6 * 60;
 
 /** Latest state of every pair + keeps them fresh: pairs never scanned (or older than a few minutes) are evaluated a few at a time
  *  while the page is open; the server keeps scanning in the background afterwards. */
-export function useBoard(prefs, { symbols = ALL, auto = true, pollMs = 15000 } = {}) {
+export function useBoard(prefs, { symbols: symbolsOpt, auto = true, pollMs = 15000 } = {}) {
+  const { myPairs } = useLive();
+  const symbols = symbolsOpt || (myPairs.length ? myPairs : ALL.slice(0, 6));      // only the pairs I chose are read and scanned
   const [data, setData] = useState({ rows: [], now: 0 });
   const [err, setErr] = useState(null);
   const [scanning, setScanning] = useState(null);     // {done, total} while a manual / automatic pass runs

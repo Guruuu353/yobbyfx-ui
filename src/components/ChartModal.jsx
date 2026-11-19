@@ -49,7 +49,7 @@ function useSymbolHistory(symbol, enabled) {
 /** Pop-up with the FULL chart (all timeframes, all overlays) for a pair, opened from any signal, alert, board row or log line.
  *  item = { symbol, tf?, plan?, firedTs?, title?, note?, status?, category? } */
 export default function ChartModal({ item, onClose }) {
-  const { prefs, setPref } = useLive();
+  const { prefs, setPref, myPairs } = useLive();
   const nav = useNavigate();
   const [symbol, setSymbol] = useState(item.symbol);
   const same = symbol === item.symbol;
@@ -82,7 +82,7 @@ export default function ChartModal({ item, onClose }) {
         <div className="flex items-center gap-2 min-w-0">
           <select value={symbol} onChange={(e) => { setSymbol(e.target.value); setFocus(null); }}
             className="bg-panel border border-border rounded-lg px-2 h-9 text-sm font-bold outline-none focus:border-gold">
-            {SYMBOLS.map((s) => <option key={s.value} value={s.value}>{s.short}</option>)}
+            {(myPairs.length ? SYMBOLS.filter((s) => myPairs.includes(s.value) || s.value === symbol) : SYMBOLS).map((s) => <option key={s.value} value={s.value}>{s.short}</option>)}
           </select>
           {same && catLabel && <Chip tone={catTone}>{catLabel}</Chip>}
           {same && item.title && <span className="text-xs text-gray-400 truncate hidden sm:inline">{item.title}</span>}
